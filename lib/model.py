@@ -37,6 +37,7 @@ class AutoFuzzifier(object):
 
         epx = 0
         for ii in range(3):
+            print("New loss term has been added.")
             for epoch in range(self.epochs[ii]):
                 epx += 1
                 for x, y, idx in train_loader:
@@ -49,7 +50,6 @@ class AutoFuzzifier(object):
                     optim.step()
 
                 for x, y, idx in epoch_loader:
-                    print("New loss term has been added.")
                     with torch.no_grad():
                         z, x_rec, y_pred = self.frm.forward(x)
 
@@ -66,7 +66,7 @@ class AutoFuzzifier(object):
                             writer.add_scalar('Loss/Clustering', loss_list[1], epx, new_style=True)
                             writer.add_scalar('Loss/Regression', loss_list[2], epx, new_style=True)
 
-                            if epx%self.his_rate==0:
+                            if epx%self.hist_rate==0:
                                 for dim in range(z.shape[-1]): 
                                     writer.add_histogram(f"Embeddings/{dim=}",z[:,dim],epx)
                         #endregion
@@ -77,8 +77,21 @@ class AutoFuzzifier(object):
             writer.close()            
 
 
-    def test():
-        pass
+    def test_model(self):
+
+        test_loader, dset = return_data(self.dataset, self.batch_size, train=False, SVD=self.SVD)
+        
+        with torch.no_grad():
+            for x, y, idx in test_loader:
+                z, x_rec, y_pred = self.frm.forward(x)
+                loss_list = self.frm.loss(x,x_rec,z,y,y_pred,idx)
+                print("Test Losses:")
+                print(f"Reconstruction={loss_list[0].item():.4f}  Clustering={loss_list[1].item():.4f}  Regression={loss_list[2].item():.4f}")
+                
+                error = (y-y_pred)*dset.std[-1]
+                mse = error.square().mean().sqrt()
+                print(f"Root Mean Squared Error: {mse.item()}")
+                print(f"Number of Parameters: {self.frm.num_parameters}")
 
 
 class VanillaRegression(object):
@@ -124,4 +137,20 @@ class VanillaRegression(object):
                         writer.add_scalar('Loss/Regression', loss, epoch, new_style=True)
 
         if self.viz:
-            writer.close()  
+            writer.close()
+
+    def test_model(self):
+
+        test_loader, dset = return_data(self.dataset, self.batch_size, train=False, SVD=self.SVD)
+        
+        with torch.no_grad():
+            for x, y, _ in test_loader:
+                y_pred = self.vrm.forward(x)
+                loss = torch.mean(torch.square(y-y_pred))
+                print("Test Loss:")
+                print(f"Regression={loss.item():.4f}")
+                
+                error = (y-y_pred)*dset.std[-1]
+                mse = error.square().mean().sqrt()
+                print(f"Root Mean Squared Error: {mse.item()}")
+                print(f"Number of Parameters: {self.vrm._num_parameters()}")
