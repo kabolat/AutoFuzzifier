@@ -2,7 +2,7 @@ import torch
 from lib.csflib import student, gauss
 
 
-NUM_NEURONS = 5
+NUM_NEURONS = 50
 ACTIVATION = torch.nn.CELU(inplace=True)
 
 class Encoder(torch.nn.Module):
@@ -12,7 +12,8 @@ class Encoder(torch.nn.Module):
         self.latent_dim = latent_dim
 
         self.fc1 = torch.nn.Linear(input_dim, NUM_NEURONS)
-        self.fc2 = torch.nn.Linear(NUM_NEURONS, latent_dim)
+        self.fc2 = torch.nn.Linear(NUM_NEURONS, NUM_NEURONS)
+        self.fc3 = torch.nn.Linear(NUM_NEURONS, latent_dim)
 
         # setup the non-linearity
         self.act = ACTIVATION
@@ -20,8 +21,12 @@ class Encoder(torch.nn.Module):
     def forward(self, x):
         h = x.view(-1, self.input_dim)
         h = self.act(self.fc1(h))
-        z = self.fc2(h)
+        h = self.act(self.fc2(h))
+        z = self.fc3(h)
         return z
+
+    def _num_parameters(self):
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 class Decoder(torch.nn.Module):
     def __init__(self,output_dim,latent_dim):
@@ -30,7 +35,8 @@ class Decoder(torch.nn.Module):
         self.latent_dim = latent_dim
 
         self.fc1 = torch.nn.Linear(latent_dim, NUM_NEURONS)
-        self.fc2 = torch.nn.Linear(NUM_NEURONS, output_dim)
+        self.fc2 = torch.nn.Linear(NUM_NEURONS, NUM_NEURONS)
+        self.fc3 = torch.nn.Linear(NUM_NEURONS, output_dim)
 
         # setup the non-linearity
         self.act = ACTIVATION
@@ -38,8 +44,12 @@ class Decoder(torch.nn.Module):
     def forward(self, z):
         h = z.view(-1, self.latent_dim)
         h = self.act(self.fc1(h))
-        x_rec = self.fc2(h)
+        h = self.act(self.fc2(h))
+        x_rec = self.fc3(h)
         return x_rec
+
+    def _num_parameters(self):
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 class VanillaNN(torch.nn.Module):
     def __init__(self,input_dim):
@@ -48,7 +58,8 @@ class VanillaNN(torch.nn.Module):
 
         self.fc1 = torch.nn.Linear(input_dim, NUM_NEURONS)
         self.fc2 = torch.nn.Linear(NUM_NEURONS, NUM_NEURONS)
-        self.fc3 = torch.nn.Linear(NUM_NEURONS, 1)
+        self.fc3 = torch.nn.Linear(NUM_NEURONS, NUM_NEURONS)
+        self.fc4 = torch.nn.Linear(NUM_NEURONS, 1)
 
         # setup the non-linearity
         self.act = ACTIVATION
@@ -57,8 +68,12 @@ class VanillaNN(torch.nn.Module):
         h = z.view(-1, self.input_dim)
         h = self.act(self.fc1(h))
         h = self.act(self.fc2(h))
-        y = self.fc3(h)
+        h = self.act(self.fc3(h))
+        y = self.fc4(h).squeeze()
         return y
+
+    def _num_parameters(self):
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 class AutoEmbedder(object):
     def __init__(self,input_dim,latent_dim,num_clusters,CSF=student,output_dist="gauss"):
@@ -71,6 +86,8 @@ class AutoEmbedder(object):
         self.input_dim = input_dim
         self.latent_dim = latent_dim
         self.targetBank = None
+        
+        self.num_parameters = self.encoder._num_parameters()+self.decoder._num_parameters()+self.centers.numel()
 
     def embeddingLoss(self,z,idx=None):
         P = self.calculateDist(z)
@@ -78,11 +95,11 @@ class AutoEmbedder(object):
             Q = self.calculateTargetDist(P)
         else:
             Q = self.targetBank[idx,:]
-        return torch.mean(Q*torch.log(Q/P),dim=0).sum()
+        return torch.sum(Q*torch.log(Q/P),dim=1).mean()
 
     def reconLoss(self,x,x_rec):
         if self.output_dist == "gauss":
-            return torch.mean(torch.square(x-x_rec),dim=0).sum()
+            return torch.mean(torch.square(x-x_rec),dim=0).mean()
 
     def calculateDist(self,z):
         D = torch.linalg.vector_norm(z.unsqueeze(-1)-self.centers.t().unsqueeze(0),dim=1)
@@ -113,6 +130,7 @@ class FuzzyRegressionModel(AutoEmbedder):
         self.num_rules = self.num_clusters
         self.dimwiseMF = dimwiseMF
         self.B = torch.randn((self.latent_dim+1,self.num_rules),requires_grad=True)
+        self.num_parameters += self.B.numel()
 
     def fuzzify(self,z):
         dimwise_distance = torch.abs(z.unsqueeze(-1)-self.centers.t().unsqueeze(0))
