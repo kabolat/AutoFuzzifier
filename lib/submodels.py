@@ -2,7 +2,7 @@ import torch
 from lib.csflib import student, gauss
 
 
-NUM_NEURONS = 50
+NUM_NEURONS = 10
 ACTIVATION = torch.nn.CELU(inplace=True)
 
 class Encoder(torch.nn.Module):
@@ -76,7 +76,7 @@ class VanillaNN(torch.nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 class AutoEmbedder(object):
-    def __init__(self,input_dim,latent_dim,num_clusters,CSF=student,output_dist="gauss"):
+    def __init__(self,input_dim,latent_dim,num_clusters,CSF=student,output_dist="gauss", fcm_loss=False):
         self.encoder = Encoder(input_dim,latent_dim)
         self.decoder = Decoder(input_dim,latent_dim)
         self.num_clusters = num_clusters
@@ -85,21 +85,29 @@ class AutoEmbedder(object):
         self.output_dist = output_dist
         self.input_dim = input_dim
         self.latent_dim = latent_dim
+        self.fcm_loss = fcm_loss
         self.targetBank = None
         
         self.num_parameters = self.encoder._num_parameters()+self.decoder._num_parameters()+self.centers.numel()
 
     def embeddingLoss(self,z,idx=None):
-        P = self.calculateDist(z)
-        if self.targetBank is None:
-            Q = self.calculateTargetDist(P)
+        if self.fcm_loss:
+            return self.fcmLoss(z,idx)
         else:
-            Q = self.targetBank[idx,:]
-        return torch.sum(Q*torch.log(Q/P),dim=1).mean()
+            P = self.calculateDist(z)
+            if self.targetBank is None:
+                Q = self.calculateTargetDist(P)
+            else:
+                Q = self.targetBank[idx,:]
+            return torch.sum(Q*torch.log(Q/P),dim=1).mean()
+    
+    def fcmLoss(self,z,idx):
+        P = self.calculateDist(z)
+        return torch.sum(torch.pow(P,2)*torch.linalg.vector_norm(z.unsqueeze(-1)-self.centers.t().unsqueeze(0),dim=1)**2,dim=1).mean()
 
     def reconLoss(self,x,x_rec):
         if self.output_dist == "gauss":
-            return torch.mean(torch.square(x-x_rec),dim=0).mean()
+            return torch.sum(torch.square(x-x_rec),dim=1).mean()
 
     def calculateDist(self,z):
         D = torch.linalg.vector_norm(z.unsqueeze(-1)-self.centers.t().unsqueeze(0),dim=1)
@@ -125,8 +133,8 @@ class AutoEmbedder(object):
             print('Cluster centers are assigned with K-Means.')
 
 class FuzzyRegressionModel(AutoEmbedder):
-    def __init__(self,input_dim,latent_dim,num_clusters,CSF=student,output_dist="gauss", dimwiseMF=False):
-        super().__init__(input_dim,latent_dim,num_clusters,CSF,output_dist)
+    def __init__(self,input_dim,latent_dim,num_clusters,CSF=student,output_dist="gauss", dimwiseMF=False, fcm_loss=False):
+        super().__init__(input_dim,latent_dim,num_clusters,CSF,output_dist,fcm_loss)
         self.num_rules = self.num_clusters
         self.dimwiseMF = dimwiseMF
         self.B = torch.randn((self.latent_dim+1,self.num_rules),requires_grad=True)

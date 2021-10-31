@@ -21,13 +21,14 @@ class AutoFuzzifier(object):
         self.frm = FuzzyRegressionModel(input_dim=return_dim(self.dataset), 
                                         latent_dim=self.latent_dim, 
                                         num_clusters=self.num_clusters,
-                                        CSF=student)
+                                        CSF=student,
+                                        fcm_loss=self.fcm_loss)
 
+    
     def train_model(self):
 
         if self.viz:
-            from torch.utils.tensorboard import SummaryWriter
-            writer = SummaryWriter()
+            self.writer = SummaryWriter()
         
         train_loader, epoch_loader = return_data(self.dataset, self.batch_size, SVD=self.SVD)
 
@@ -62,19 +63,16 @@ class AutoFuzzifier(object):
 
                         #region Tensorboard Visualization
                         if self.viz:
-                            writer.add_scalar('Loss/Reconstruction', loss_list[0], epx, new_style=True)
-                            writer.add_scalar('Loss/Clustering', loss_list[1], epx, new_style=True)
-                            writer.add_scalar('Loss/Regression', loss_list[2], epx, new_style=True)
+                            self.writer.add_scalar('Loss/Reconstruction', loss_list[0], epx, new_style=True)
+                            self.writer.add_scalar('Loss/Clustering', loss_list[1], epx, new_style=True)
+                            self.writer.add_scalar('Loss/Regression', loss_list[2], epx, new_style=True)
 
                             if epx%self.hist_rate==0:
                                 for dim in range(z.shape[-1]): 
-                                    writer.add_histogram(f"Embeddings/{dim=}",z[:,dim],epx)
+                                    self.writer.add_histogram(f"Embeddings/{dim=}",z[:,dim],epx)
                         #endregion
 
             if ii == 0: self.frm.init_centers(Z=z)
-
-        if self.viz:
-            writer.close()            
 
 
     def test_model(self):
@@ -89,9 +87,12 @@ class AutoFuzzifier(object):
                 print(f"Reconstruction={loss_list[0].item():.4f}  Clustering={loss_list[1].item():.4f}  Regression={loss_list[2].item():.4f}")
                 
                 error = (y-y_pred)*dset.std[-1]
-                mse = error.square().mean().sqrt()
-                print(f"Root Mean Squared Error: {mse.item()}")
+                rmse = error.square().mean().sqrt()
+                print(f"Root Mean Squared Error: {rmse.item()}")
                 print(f"Number of Parameters: {self.frm.num_parameters}")
+            
+            if self.viz:
+                self.writer.add_hparams({'latent_dim':self.latent_dim, 'num_clusters':self.num_clusters, 'lr':self.learning_rate, 'batch_size':self.batch_size},{'hparam/RMSE':rmse})
 
 
 class VanillaRegression(object):
@@ -112,8 +113,7 @@ class VanillaRegression(object):
     def train_model(self):
         
         if self.viz:
-            from torch.utils.tensorboard import SummaryWriter
-            writer = SummaryWriter()
+            self.writer = SummaryWriter()
 
         train_loader, epoch_loader = return_data(self.dataset, self.batch_size, SVD=self.SVD)
         optim = torch.optim.Adam(self.vrm.parameters(),lr=self.learning_rate)
@@ -134,10 +134,7 @@ class VanillaRegression(object):
                     print(f"Regression={loss.item():.4f}")
 
                     if self.viz:
-                        writer.add_scalar('Loss/Regression', loss, epoch, new_style=True)
-
-        if self.viz:
-            writer.close()
+                        self.writer.add_scalar('Loss/Regression', loss, epoch, new_style=True)
 
     def test_model(self):
 
@@ -151,6 +148,9 @@ class VanillaRegression(object):
                 print(f"Regression={loss.item():.4f}")
                 
                 error = (y-y_pred)*dset.std[-1]
-                mse = error.square().mean().sqrt()
-                print(f"Root Mean Squared Error: {mse.item()}")
+                rmse = error.square().mean().sqrt()
+                print(f"Root Mean Squared Error: {rmse.item()}")
                 print(f"Number of Parameters: {self.vrm._num_parameters()}")
+
+            if self.viz:
+                self.writer.add_hparams({'lr':self.learning_rate, 'batch_size':self.batch_size},{'hparam/RMSE':rmse})
