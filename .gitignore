@@ -1,2 +1,4 @@
 lib/__pycache__/
 runs
+lib/__pycache__/datasets.cpython-38.pyc
+lib/__pycache__/model.cpython-38.pyc
