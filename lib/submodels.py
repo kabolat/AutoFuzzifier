@@ -14,6 +14,7 @@ class Encoder(torch.nn.Module):
         self.fc1 = torch.nn.Linear(input_dim, NUM_NEURONS)
         self.fc2 = torch.nn.Linear(NUM_NEURONS, NUM_NEURONS)
         self.fc3 = torch.nn.Linear(NUM_NEURONS, latent_dim)
+        self.bn =  torch.nn.BatchNorm1d(latent_dim,momentum=0.7)
 
         # setup the non-linearity
         self.act = ACTIVATION
@@ -23,6 +24,7 @@ class Encoder(torch.nn.Module):
         h = self.act(self.fc1(h))
         h = self.act(self.fc2(h))
         z = self.fc3(h)
+        z = self.bn(z)
         return z
 
     def _num_parameters(self):
@@ -137,7 +139,7 @@ class FuzzyRegressionModel(AutoEmbedder):
         super().__init__(input_dim,latent_dim,num_clusters,CSF,output_dist,fcm_loss)
         self.num_rules = self.num_clusters
         self.dimwiseMF = dimwiseMF
-        self.B = torch.randn((self.latent_dim+1,self.num_rules),requires_grad=True)
+        self.B = torch.randn((self.latent_dim+1,self.num_rules),requires_grad=False)
         self.num_parameters += self.B.numel()
 
     def fuzzify(self,z):
@@ -172,7 +174,7 @@ class FuzzyRegressionModel(AutoEmbedder):
         regression_loss = self.regressionLoss(y,y_pred)
         return [recon_loss,embedding_loss,regression_loss]
     
-    def forward(self,x):
+    def forward(self,x,y=None):
         z = self.encoder(x)
         x_rec = self.decoder(z)
 
@@ -181,6 +183,9 @@ class FuzzyRegressionModel(AutoEmbedder):
             normalized_firings = self.rulebase(mu)
         else:
             normalized_firings = self.calculateDist(z)
+        if y is not None:
+            self.B = self.findOptimalB(normalized_firings,z,y)
+            # print(self.B[0])
         y_pred = self.defuzzify(normalized_firings,z)
         
         return z, x_rec, y_pred
