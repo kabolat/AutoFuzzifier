@@ -24,7 +24,6 @@ class AutoFuzzifier(object):
                                         CSF=student,
                                         fcm_loss=self.fcm_loss)
 
-    
     def train_model(self):
 
         if self.viz:
@@ -34,7 +33,7 @@ class AutoFuzzifier(object):
 
         optim = torch.optim.Adam([{'params':self.frm.encoder.parameters()},
                                 {'params':self.frm.decoder.parameters()},
-                                {'params':self.frm.centers}],lr=self.learning_rate)
+                                {'params':self.frm.centers}],lr=self.learning_rate, weight_decay=0.01)
 
         epx = 0
         for ii in range(3):
@@ -52,7 +51,7 @@ class AutoFuzzifier(object):
 
                 for x, y, idx in epoch_loader:
                     with torch.no_grad():
-                        z, x_rec, y_pred = self.frm.forward(x)
+                        z, x_rec, y_pred = self.frm.forward(x,y)
 
                         loss_list = self.frm.loss(x,x_rec,z,y,y_pred,idx) 
                         print(f"Reconstruction={loss_list[0].item():.4f}  Clustering={loss_list[1].item():.4f}  Regression={loss_list[2].item():.4f}")
@@ -92,7 +91,18 @@ class AutoFuzzifier(object):
                 print(f"Number of Parameters: {self.frm.num_parameters}")
             
             if self.viz:
-                self.writer.add_hparams({'latent_dim':self.latent_dim, 'num_clusters':self.num_clusters, 'lr':self.learning_rate, 'batch_size':self.batch_size},{'hparam/RMSE':rmse})
+                self.writer.add_hparams({'dataset':self.dataset,
+                                         'model':self.model,
+                                         'epochs':str(self.epochs),
+                                         'loss_coeffs':str(self.loss_coeffs),
+                                         'batch_size':int(self.batch_size),
+                                         'lr':self.learning_rate,
+                                         'SVD':self.SVD,
+                                         'fcm_loss':self.fcm_loss,
+                                         'latent_dim':int(self.latent_dim),
+                                         'num_clusters':int(self.num_clusters),
+                                         'num_params':self.frm.num_parameters,},
+                                        {'hparam/RMSE':rmse})
 
 
 class VanillaRegression(object):
@@ -153,4 +163,12 @@ class VanillaRegression(object):
                 print(f"Number of Parameters: {self.vrm._num_parameters()}")
 
             if self.viz:
-                self.writer.add_hparams({'lr':self.learning_rate, 'batch_size':self.batch_size},{'hparam/RMSE':rmse})
+                self.writer.add_hparams({'dataset':self.dataset,
+                                         'model':self.model,
+                                         'epochs':str(sum(self.epochs)),
+                                         'batch_size':int(self.batch_size),
+                                         'lr':self.learning_rate,
+                                         'SVD':self.SVD,
+                                         'latent_dim':int(self.latent_dim),
+                                         'num_params':self.frm.num_parameters,},
+                                        {'hparam/RMSE':rmse})
