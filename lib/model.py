@@ -103,6 +103,7 @@ class AutoFuzzifier(object):
                                          'num_clusters':int(self.num_clusters),
                                          'num_params':self.frm.num_parameters,},
                                         {'hparam/RMSE':rmse})
+            return rmse.item()
 
 
 class VanillaRegression(object):
