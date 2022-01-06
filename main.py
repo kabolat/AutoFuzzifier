@@ -25,12 +25,13 @@ if __name__=="__main__":
     parser.add_argument('--num_clusters', default=10, type=int)
     parser.add_argument('--epochs', nargs="*", default=[300, 300, 400], type=int)
     parser.add_argument('--loss_coeffs', nargs="*", default=[10, 0.1, 1], type=float)
-    parser.add_argument('--batch_size', default=128, type=int)
-    parser.add_argument('--learning_rate', default=1e-4, type=float)
+    parser.add_argument('--batch_size', default=32, type=int)
+    parser.add_argument('--learning_rate', default=1e-2, type=float)
     parser.add_argument('--dataset', default="airfoil", type=str)
 
     parser.add_argument('--viz', default=True, type=bool)
     parser.add_argument('--hist_rate', default=50, type=int)
+    parser.add_argument('--val_rate', default=1, type=int)
 
     args = parser.parse_args()
 

@@ -29,12 +29,13 @@ class AutoFuzzifier(object):
         if self.viz:
             self.writer = SummaryWriter()
         
-        train_loader, epoch_loader = return_data(self.dataset, self.batch_size, SVD=self.SVD)
+        train_loader, epoch_loader, valdata = return_data(self.dataset, self.batch_size, SVD=self.SVD)
 
         optim = torch.optim.Adam([{'params':self.frm.encoder.parameters()},
                                 {'params':self.frm.decoder.parameters()},
                                 {'params':self.frm.centers}],lr=self.learning_rate, weight_decay=0.01)
 
+        loss_list_val = [0.0, 0.0, 0.0]
         epx = 0
         for ii in range(3):
             print("New loss term has been added.")
@@ -49,12 +50,19 @@ class AutoFuzzifier(object):
                     loss.backward()
                     optim.step()
 
-                for x, y, idx in epoch_loader:
+                for x, y, _ in epoch_loader:
                     with torch.no_grad():
                         z, x_rec, y_pred = self.frm.forward(x,y)
 
-                        loss_list = self.frm.loss(x,x_rec,z,y,y_pred,idx) 
-                        print(f"Reconstruction={loss_list[0].item():.4f}  Clustering={loss_list[1].item():.4f}  Regression={loss_list[2].item():.4f}")
+                        # loss_list = self.frm.loss(x,x_rec,z,y,y_pred) 
+                        # print(f"Reconstruction={loss_list[0].item():.4f}  Clustering={loss_list[1].item():.4f}  Regression={loss_list[2].item():.4f}")
+                        
+                        if epx%self.val_rate==0:
+                            z, x_rec, y_pred = self.frm.forward(valdata[:,:-1])
+
+                            loss_list_val = self.frm.loss(valdata[:,:-1],x_rec,z,valdata[:,-1],y_pred,idx=None) 
+                            print(f"VALIDATION:   Reconstruction={loss_list_val[0].item():.4f}  Clustering={loss_list_val[1].item():.4f}  Regression={loss_list_val[2].item():.4f}")
+                            
 
                         if (ii>0 or epoch==self.epochs[0]-1) and self.use_target_bank:
                             self.frm.targetBank = self.frm.calculateTargetDist(self.frm.calculateDist(z))
@@ -62,9 +70,12 @@ class AutoFuzzifier(object):
 
                         #region Tensorboard Visualization
                         if self.viz:
-                            self.writer.add_scalar('Loss/Reconstruction', loss_list[0], epx, new_style=True)
-                            self.writer.add_scalar('Loss/Clustering', loss_list[1], epx, new_style=True)
-                            self.writer.add_scalar('Loss/Regression', loss_list[2], epx, new_style=True)
+                            # self.writer.add_scalar('Loss/Reconstruction', loss_list[0], epx)
+                            self.writer.add_scalar('Loss/Reconstruction', loss_list_val[0], epx)
+                            # self.writer.add_scalar('Loss/Clustering', loss_list[0], epx)
+                            self.writer.add_scalar('Loss/Clustering', loss_list_val[1], epx)
+                            # self.writer.add_scalar('Loss/Regression', loss_list[0], epx)
+                            self.writer.add_scalar('Loss/Regression', loss_list_val[2], epx)
 
                             if epx%self.hist_rate==0:
                                 for dim in range(z.shape[-1]): 
