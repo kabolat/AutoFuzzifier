@@ -193,7 +193,7 @@ def return_data(dset_name, batch_size, train=True, SVD=True):
     if train:
         train_loader = DataLoader(dset, batch_size=batch_size, shuffle=True, drop_last=True)
         epoch_loader = DataLoader(dset, batch_size=dset.__len__(), shuffle=False, drop_last=False)
-        return train_loader, epoch_loader, dset.valdata
+        return train_loader, epoch_loader, dset.valdata, dset.std
     else:
         return DataLoader(dset, batch_size=dset.__len__(), shuffle=False, drop_last=False), dset
     

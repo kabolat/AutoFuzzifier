@@ -1,7 +1,7 @@
 import torch
 from lib.datasets import return_data, return_dim
 from torch.utils.tensorboard import SummaryWriter
-
+import optuna
 
 class AutoFuzzifier(object):
     def __init__(self,args):
@@ -24,18 +24,18 @@ class AutoFuzzifier(object):
                                         CSF=student,
                                         fcm_loss=self.fcm_loss)
 
-    def train_model(self):
+    def train_model(self,trial=None):
 
         if self.viz:
             self.writer = SummaryWriter()
         
-        train_loader, epoch_loader, valdata = return_data(self.dataset, self.batch_size, SVD=self.SVD)
+        train_loader, epoch_loader, valdata, dset_std = return_data(self.dataset, self.batch_size, SVD=self.SVD)
 
         optim = torch.optim.Adam([{'params':self.frm.encoder.parameters()},
                                 {'params':self.frm.decoder.parameters()},
                                 {'params':self.frm.centers}],lr=self.learning_rate, weight_decay=0.01)
 
-        loss_list_val = [0.0, 0.0, 0.0]
+        # loss_list_val = [0.0, 0.0, 0.0]
         epx = 0
         for ii in range(3):
             print("New loss term has been added.")
@@ -54,15 +54,23 @@ class AutoFuzzifier(object):
                     with torch.no_grad():
                         z, x_rec, y_pred = self.frm.forward(x,y)
 
-                        # loss_list = self.frm.loss(x,x_rec,z,y,y_pred) 
+                        loss_list = self.frm.loss(x,x_rec,z,y,y_pred) 
                         # print(f"Reconstruction={loss_list[0].item():.4f}  Clustering={loss_list[1].item():.4f}  Regression={loss_list[2].item():.4f}")
                         
-                        if epx%self.val_rate==0:
+                        if epx%self.val_rate==0 or epx==sum(self.epochs):
                             z, x_rec, y_pred = self.frm.forward(valdata[:,:-1])
-
-                            loss_list_val = self.frm.loss(valdata[:,:-1],x_rec,z,valdata[:,-1],y_pred,idx=None) 
-                            print(f"VALIDATION:   Reconstruction={loss_list_val[0].item():.4f}  Clustering={loss_list_val[1].item():.4f}  Regression={loss_list_val[2].item():.4f}")
+                            # loss_list_val = self.frm.loss(valdata[:,:-1],x_rec,z,valdata[:,-1],y_pred,idx=None)
+                            # loss_val = sum([loss*coeff for loss,coeff in zip(loss_list_val,self.loss_coeffs)][:ii+1])
+                            # print(f"VALIDATION:   Reconstruction={loss_list_val[0].item():.4f}  Clustering={loss_list_val[1].item():.4f}  Regression={loss_list_val[2].item():.4f}")
                             
+                            error = (valdata[:,-1]-y_pred)*dset_std[-1]
+                            rmse = error.square().mean().sqrt()
+                            # print(f"RMSE:{rmse.item()}")
+                            if self.viz: self.writer.add_scalar('Loss/RMSE', rmse, epx)
+                            
+                            # if trial is not None: 
+                            #     trial.report(loss_val, epx)
+                            #     if trial.should_prune(): raise optuna.exceptions.TrialPruned()
 
                         if (ii>0 or epoch==self.epochs[0]-1) and self.use_target_bank:
                             self.frm.targetBank = self.frm.calculateTargetDist(self.frm.calculateDist(z))
@@ -70,12 +78,13 @@ class AutoFuzzifier(object):
 
                         #region Tensorboard Visualization
                         if self.viz:
-                            # self.writer.add_scalar('Loss/Reconstruction', loss_list[0], epx)
-                            self.writer.add_scalar('Loss/Reconstruction', loss_list_val[0], epx)
-                            # self.writer.add_scalar('Loss/Clustering', loss_list[0], epx)
-                            self.writer.add_scalar('Loss/Clustering', loss_list_val[1], epx)
-                            # self.writer.add_scalar('Loss/Regression', loss_list[0], epx)
-                            self.writer.add_scalar('Loss/Regression', loss_list_val[2], epx)
+                            self.writer.add_scalar('Loss/Reconstruction', loss_list[0], epx)
+                            # self.writer.add_scalar('Loss/Reconstruction', loss_list_val[0], epx)
+                            self.writer.add_scalar('Loss/Clustering', loss_list[1], epx)
+                            # self.writer.add_scalar('Loss/Clustering', loss_list_val[1], epx)
+                            self.writer.add_scalar('Loss/Regression', loss_list[2], epx)
+                            # self.writer.add_scalar('Loss/Regression', loss_list_val[2], epx)
+                            
 
                             if epx%self.hist_rate==0:
                                 for dim in range(z.shape[-1]): 
@@ -83,6 +92,21 @@ class AutoFuzzifier(object):
                         #endregion
 
             if ii == 0: self.frm.init_centers(Z=z)
+        
+        if self.viz:
+            self.writer.add_hparams({'dataset':self.dataset,
+                                        'model':self.model,
+                                        'epochs':str(self.epochs),
+                                        'loss_coeffs':str(self.loss_coeffs),
+                                        'batch_size':int(self.batch_size),
+                                        'lr':self.learning_rate,
+                                        'SVD':self.SVD,
+                                        'fcm_loss':self.fcm_loss,
+                                        'latent_dim':int(self.latent_dim),
+                                        'num_clusters':int(self.num_clusters),
+                                        'num_params':self.frm.num_parameters,},
+                                    {'hparam/RMSE':rmse})
+        return rmse
 
 
     def test_model(self):
@@ -101,19 +125,19 @@ class AutoFuzzifier(object):
                 print(f"Root Mean Squared Error: {rmse.item()}")
                 print(f"Number of Parameters: {self.frm.num_parameters}")
             
-            if self.viz:
-                self.writer.add_hparams({'dataset':self.dataset,
-                                         'model':self.model,
-                                         'epochs':str(self.epochs),
-                                         'loss_coeffs':str(self.loss_coeffs),
-                                         'batch_size':int(self.batch_size),
-                                         'lr':self.learning_rate,
-                                         'SVD':self.SVD,
-                                         'fcm_loss':self.fcm_loss,
-                                         'latent_dim':int(self.latent_dim),
-                                         'num_clusters':int(self.num_clusters),
-                                         'num_params':self.frm.num_parameters,},
-                                        {'hparam/RMSE':rmse})
+            # if self.viz:
+            #     self.writer.add_hparams({'dataset':self.dataset,
+            #                              'model':self.model,
+            #                              'epochs':str(self.epochs),
+            #                              'loss_coeffs':str(self.loss_coeffs),
+            #                              'batch_size':int(self.batch_size),
+            #                              'lr':self.learning_rate,
+            #                              'SVD':self.SVD,
+            #                              'fcm_loss':self.fcm_loss,
+            #                              'latent_dim':int(self.latent_dim),
+            #                              'num_clusters':int(self.num_clusters),
+            #                              'num_params':self.frm.num_parameters,},
+            #                             {'hparam/RMSE':rmse})
             return rmse.item()
 
 
